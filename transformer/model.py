@@ -190,14 +190,77 @@ class ShortConnection(nn.Module):
     def forward(self, x, sublayer):
         return x + self.dropout(sublayer(self.norm(x)))
 
+'''
+Encoder Block:- Encoder Layer * number of encoder blocks 
+'''
+class EncoderBlock(nn.Module):
+    def __init__(self, multi_head_block: MultiHeadAttention, feed_forward_block: FeedForwardNetwork, dropout: float) -> None:
+        super().__init__()
+        # Calling multi-head attention block and feed forward block 
+        self.multi_head_block = multi_head_block
+        self.feed_forward_block = feed_forward_block
+
+        # Residual/ Short Connection layers:- 2
+        self.short_connection = nn.ModuleList(ShortConnection(dropout) for _ in range(2))
+    
+    def forward(self, x):
+        x = self.short_connection[0](x, lambda z: self.multi_head_block(z))
+        x = self.short_connection[1](x, lambda z: self.feed_forward_block(z))
+        # x_1 = input + mha(norm(x)), x_2 = x_1 + ffd(norm(x)) 
+        return x
+    
+
+# Encoder Main logic with heads = 6 (original transformer)
+class Encoder(nn.Module):
+    def __init__(self, encoder_layers: nn.ModuleList):
+        super().__init__()
+        # Calling encoder layer each time + doing normalization 
+        #self.output_layer = []
+        self.encoder_layers = encoder_layers
+        self.norm = LayerNormalization()
+
+    def forward(self, x):
+        # In every encoder block connecting it together and normalization 
+        for layer in self.encoder_layers:
+            x = layer(x)
+            #self.output_layer.append(x)
+        
+        # Normalization 
+        return self.norm(x)
+
 
 # Testing out code functionality 
 torch.manual_seed(123)
 inputs = torch.randn([2, 3, 6])
 feature_dims = inputs.shape[-1]
 vocab_size = inputs.shape[1]
-mha = MultiHeadAttention(feature_dims, vocab_size, 2, 0.0)
-print(f'MultiheadAttention.Values: \n{mha(inputs)}')
 
-short_conn = ShortConnection()
-print(f'ShortConn.Values: \n{short_conn(inputs, mha)}')
+encoder_layer = nn.ModuleList([
+    EncoderBlock(
+    MultiHeadAttention(feature_dims, vocab_size, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0), 
+    EncoderBlock(
+    MultiHeadAttention(feature_dims, vocab_size, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0), 
+    EncoderBlock(
+    MultiHeadAttention(feature_dims, vocab_size, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0), 
+    EncoderBlock(
+    MultiHeadAttention(feature_dims, vocab_size, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0), 
+    EncoderBlock(
+    MultiHeadAttention(feature_dims, vocab_size, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0), 
+    EncoderBlock(
+    MultiHeadAttention(feature_dims, vocab_size, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0), 
+])
+
+encoder = Encoder(encoder_layer)
+print(f'EncoderBlock.Values: \n{encoder(inputs)}') # Obj: - Why encoder block output is 1 for each element ?
