@@ -208,7 +208,7 @@ class EncoderBlock(nn.Module):
         self.feed_forward_block = feed_forward_block
 
         # Residual/ Short Connection layers:- 2
-        self.short_connection = nn.ModuleList(ShortConnection(dropout) for _ in range(2))
+        self.short_connection = nn.ModuleList([ShortConnection(dropout) for _ in range(2)])
     
     def forward(self, x, src_mask):
         x = self.short_connection[0](x, lambda z: self.multi_head_block(x, x, x, src_mask))
@@ -235,6 +235,59 @@ class Encoder(nn.Module):
         # Normalization 
         return self.norm(x)
 
+'''
+Decoder_Block: - 3 Residual connection (Shortcut connnection)
+1 Multi-head Attention (query, key, value) ---> Decoder
+1 Cross-head Attention (query) --> Decoder, (key, value) --> Encoder
+1 Feed_forward_network(linear_layer, activation, linear_layer)
+'''
+class DecoderBlock(nn.Module):
+    
+    def __init__(self, self_attention_block: MultiHeadAttention, cross_attention_block: MultiHeadAttention, feed_forward_block: FeedForwardNetwork, dropout: float) -> None: 
+        super().__init__() # calling to nn.Module class 
+        self.self_attention_block = self_attention_block
+        self.cross_attention_block = cross_attention_block
+        self.feed_forward_block = feed_forward_block
+        self.dropout = nn.Dropout(dropout)
+
+        # 3 blocks of residual(shortcut connection)
+        self.short_connection = nn.ModuleList([ShortConnection(dropout) for _ in range(3)]) 
+
+    '''
+    x: - Decoder Input
+    encoder_output: - Output of encoder block 
+    src_mask: mask comming from enoder block 
+    tgt_mask: mask comming from decoder block
+    '''
+    def forward(self, x, encoder_output, src_mask, tgt_mask):
+        # Now for each block we need to connect sub-layers with shortconnection 
+        # Short-connection with self-multi-head attention block 
+        x = self.short_connection[0](x, lambda z: self.self_attention_block(x, x, x, tgt_mask))
+
+        # Short-connect with cross-multi-head attention block 
+        x = self.short_connection[1](x, lambda z: self.cross_attention_block(x, encoder_output, encoder_output, src_mask))
+
+        # Short-connection with feed_forward 
+        x = self.short_connection[2](x, lambda z: self.feed_forward_block(x))
+
+        # Returing all 3 layers combined together 
+        return x
+
+
+# Decoder_layer
+class Decoder(nn.Module):
+    
+    def __init__(self, layers: nn.ModuleList) -> None:
+        super().__init__()
+        self.layers = layers
+        self.norm = LayerNormalization()
+    
+    def forward(self, x, encoder_output, src_mask, tgt_mask):
+        for layer in self.layers:
+            x = layer(x, encoder_output, src_mask, tgt_mask)
+        
+        return self.norm(x)
+
 
 # Testing out code functionality 
 torch.manual_seed(123)
@@ -246,12 +299,14 @@ q = torch.randn([vocab_size, feature_dims])
 k = torch.randn([vocab_size, feature_dims])
 v = torch.randn([vocab_size, feature_dims])
 mask = (torch.rand([vocab_size, vocab_size]) > 0.6).int()
+tgt_mask = (torch.rand([vocab_size, vocab_size]) > 0.7).int()
 
 # Change dims such as (batch_size, vocab_size, feature_dims)
 q = torch.stack([q, q], dim= 0)
 k = torch.stack([k, k], dim= 0)
 v = torch.stack([v, v], dim= 0)
-mask = torch.stack([mask, mask], dim=0)
+src_mask = torch.stack([mask, mask], dim=0)
+tgt_mask = torch.stack([tgt_mask, tgt_mask], dim= 0)
 
 # Encoder Block
 '''mha = MultiHeadAttention(feature_dims, 2, 0.0)
@@ -285,4 +340,52 @@ encoder_layer = nn.ModuleList([
 ])
 
 encoder = Encoder(encoder_layer)
-print(f'EncoderBlock.Values: \n{encoder(inputs, mask)}') # Obj: - Why encoder block output is 1 for each element ?
+encoder_output = encoder(inputs, src_mask)
+# Observation: - Why encoder block output is 1 for each element ?
+print(f'EncoderBlock.Values: \n{encoder_output}') 
+
+# Decoder_layer 
+decoder_layer = nn.ModuleList([
+    DecoderBlock(
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0
+    ), 
+    DecoderBlock(
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0
+    ), 
+    DecoderBlock(
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0
+    ), 
+    DecoderBlock(
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0
+    ), 
+    DecoderBlock(
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0
+    ), 
+    DecoderBlock(
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0
+    ), 
+    
+])
+
+decoder = Decoder(decoder_layer)
+decoder_output = decoder(inputs, encoder_output, src_mask, tgt_mask)
+# Observation: - Why decoder block out is also 1 ?
+print(f'DecoderBlock.values: \n{decoder_output}')
