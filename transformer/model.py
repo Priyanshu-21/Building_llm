@@ -112,11 +112,10 @@ num_head = number of attention head running parallel to compute context vectors
 head_dim = feature_dims / num_head 
 '''
 class MultiHeadAttention(nn.Module): 
-    def __init__(self, feature_dims: int, context_length: int, num_head: int, dropout: float, qkv_bias: bool = False) -> None:
+    def __init__(self, feature_dims: int, num_head: int, dropout: float, qkv_bias: bool = False) -> None:
         super().__init__()
         self.feature_dims = feature_dims
         self.num_head = num_head
-        self.context_length = context_length
         assert feature_dims % num_head == 0, "feature_dims not divisible by num_head"
         # Calculation of head dimensions in the model 
         self.head_dims = feature_dims // num_head
@@ -125,24 +124,49 @@ class MultiHeadAttention(nn.Module):
         self.W_q = nn.Linear(feature_dims, feature_dims, bias= qkv_bias)
         self.W_k = nn.Linear(feature_dims, feature_dims, bias= qkv_bias)
         self.W_v = nn.Linear(feature_dims, feature_dims, bias= qkv_bias)
-
+        # To output layer
+        self.W_o = nn.Linear(feature_dims, feature_dims, bias= qkv_bias)
         # Dropout layer 
         self.dropout = nn.Dropout(dropout)
-
-        # Masked Layer to convert resultant matrix to upper triangular matrix (Helpful in masking)
-        self.register_buffer('mask', torch.triu(torch.ones(context_length, context_length), diagonal= 1))
     
-    def forward(self, x):
-        batch_size, tokens, feature_dim = x.shape
+    @staticmethod
+    def attention_scores(query, key, value, mask, dropout: nn.Dropout):
+
+        # Calculation of attention scores (query * key.T)
+        # (batch_size, num_head, token, head_dim) * (batch_size, num_head, head_dim, token)
+        # Result --> (batch_size, num_head, token, token)
+        attention_score = query @ key.transpose(2, 3)
+
+        # Masking Casual: tokens should attend only to previous tokens where mask values == 0 (True)
+        if mask is not None:
+            attention_score = attention_score.masked_fill_(mask== 0, 10e-8)
+        
+        # Calculating attention matrix: - softmax + Scaled dot product (sqrt(dims(key)))
+        attention_matrix = torch.softmax(attention_score / key.shape[-1]**0.5, dim= -1)
+
+        # Applying dropout 
+        dropout(attention_matrix)
+
+        # Calculating Context vectors 
+        # (batch_size, num_head, token, token) @ (batch_size, num_head, token, head_dims)
+        # (batch_size, num_head, token, head_dim) --> Transpose(1, 2) original config 
+        context_vecs = (attention_matrix @ value).transpose(1, 2)
+
+        # Returning attention_matrix to later visualize tokens 
+        return context_vecs, attention_matrix
+
+    # Slightly different approach for encoder and decoder block (Transformer Model)
+    def forward(self, q, k, v, mask):
+        
         # Have query, key, value matrix assigned for each token
-        query = self.W_q(x)
-        key = self.W_k(x)
-        value = self.W_v(x)
+        query = self.W_q(q)
+        key = self.W_k(k)
+        value = self.W_v(v)
 
         # Transformation of query, key, value matrix (batch_size, tokens, num_head, head_dims)
-        query = query.view(batch_size, tokens, self.num_head, self.head_dims)
-        key = key.view(batch_size, tokens, self.num_head, self.head_dims)
-        value = value.view(batch_size, tokens, self.num_head, self.head_dims)
+        query = query.view(query.shape[0], query.shape[1], self.num_head, self.head_dims)
+        key = key.view(key.shape[0], key.shape[1], self.num_head, self.head_dims)
+        value = value.view(value.shape[0], value.shape[1], self.num_head, self.head_dims)
 
         # Changing position of matrix to group them num_head wise
         # (batch_size, token, num_head, head_dims) --> (batch_size, num_head, token, head_dims)
@@ -150,30 +174,13 @@ class MultiHeadAttention(nn.Module):
         key = key.transpose(1, 2)
         value = value.transpose(1, 2)
 
-        # Calculation of attention scores (query * key.T)
-        # (batch_size, num_head, token, head_dim) * (batch_size, num_head, head_dim, token)
-        # Result --> (batch_size, num_head, token, token)
-        attention_score = query @ key.transpose(2, 3)
-
-        # Masking Casual: tokens should attend only to previous tokens  
-        attention_score = attention_score.masked_fill_(
-            self.mask.bool(), -torch.inf # type: ignore
-        )
-
-        # Calculating attention matrix: - softmax + Scaled dot product (sqrt(dims(key)))
-        attention_matrix = torch.softmax(attention_score / key.shape[-1]**0.5, dim= -1)
-
-        # Applying dropout 
-        self.dropout(attention_matrix)
-
-        # Calculating Context vectors 
-        # (batch_size, num_head, token, token) @ (batch_size, num_head, token, head_dims)
-        # (batch_size, num_head, token, head_dim) --> Transpose(1, 2) original config 
-        context_vecs = (attention_matrix @ value).transpose(1, 2)
+        # call to attention static method 
+        context_vecs, self.attention_matrix = MultiHeadAttention.attention_scores(query, key, value, mask, self.dropout)
 
         # Transforming context_vecs back to (batch_size, tokens, feature_dims)
-        context_vecs = context_vecs.contiguous().view(batch_size, tokens, feature_dim)
-        return context_vecs
+        context_vecs = context_vecs.contiguous().view(context_vecs.shape[0], context_vecs.shape[1], self.num_head * self.head_dims)
+
+        return self.W_o(context_vecs)
 
 
 '''
@@ -203,8 +210,8 @@ class EncoderBlock(nn.Module):
         # Residual/ Short Connection layers:- 2
         self.short_connection = nn.ModuleList(ShortConnection(dropout) for _ in range(2))
     
-    def forward(self, x):
-        x = self.short_connection[0](x, lambda z: self.multi_head_block(z))
+    def forward(self, x, src_mask):
+        x = self.short_connection[0](x, lambda z: self.multi_head_block(x, x, x, src_mask))
         x = self.short_connection[1](x, lambda z: self.feed_forward_block(z))
         # x_1 = input + mha(norm(x)), x_2 = x_1 + ffd(norm(x)) 
         return x
@@ -219,10 +226,10 @@ class Encoder(nn.Module):
         self.encoder_layers = encoder_layers
         self.norm = LayerNormalization()
 
-    def forward(self, x):
+    def forward(self, x, mask):
         # In every encoder block connecting it together and normalization 
         for layer in self.encoder_layers:
-            x = layer(x)
+            x = layer(x, mask)
             #self.output_layer.append(x)
         
         # Normalization 
@@ -235,32 +242,47 @@ inputs = torch.randn([2, 3, 6])
 feature_dims = inputs.shape[-1]
 vocab_size = inputs.shape[1]
 
+q = torch.randn([vocab_size, feature_dims])
+k = torch.randn([vocab_size, feature_dims])
+v = torch.randn([vocab_size, feature_dims])
+mask = (torch.rand([vocab_size, vocab_size]) > 0.6).int()
+
+# Change dims such as (batch_size, vocab_size, feature_dims)
+q = torch.stack([q, q], dim= 0)
+k = torch.stack([k, k], dim= 0)
+v = torch.stack([v, v], dim= 0)
+mask = torch.stack([mask, mask], dim=0)
+
+# Encoder Block
+'''mha = MultiHeadAttention(feature_dims, 2, 0.0)
+print(f'Context_vecs \n{mha(q, k, v, mask)}')'''
+
 encoder_layer = nn.ModuleList([
     EncoderBlock(
-    MultiHeadAttention(feature_dims, vocab_size, 2, 0.0), 
+    MultiHeadAttention(feature_dims, 2, 0.0), 
     FeedForwardNetwork(feature_dims, 0.0), 
     0.0), 
     EncoderBlock(
-    MultiHeadAttention(feature_dims, vocab_size, 2, 0.0), 
+    MultiHeadAttention(feature_dims, 2, 0.0), 
     FeedForwardNetwork(feature_dims, 0.0), 
     0.0), 
     EncoderBlock(
-    MultiHeadAttention(feature_dims, vocab_size, 2, 0.0), 
+    MultiHeadAttention(feature_dims, 2, 0.0), 
     FeedForwardNetwork(feature_dims, 0.0), 
     0.0), 
     EncoderBlock(
-    MultiHeadAttention(feature_dims, vocab_size, 2, 0.0), 
+    MultiHeadAttention(feature_dims, 2, 0.0), 
     FeedForwardNetwork(feature_dims, 0.0), 
     0.0), 
     EncoderBlock(
-    MultiHeadAttention(feature_dims, vocab_size, 2, 0.0), 
+    MultiHeadAttention(feature_dims, 2, 0.0), 
     FeedForwardNetwork(feature_dims, 0.0), 
     0.0), 
     EncoderBlock(
-    MultiHeadAttention(feature_dims, vocab_size, 2, 0.0), 
+    MultiHeadAttention(feature_dims, 2, 0.0), 
     FeedForwardNetwork(feature_dims, 0.0), 
     0.0), 
 ])
 
 encoder = Encoder(encoder_layer)
-print(f'EncoderBlock.Values: \n{encoder(inputs)}') # Obj: - Why encoder block output is 1 for each element ?
+print(f'EncoderBlock.Values: \n{encoder(inputs, mask)}') # Obj: - Why encoder block output is 1 for each element ?
