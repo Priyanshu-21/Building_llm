@@ -1,0 +1,100 @@
+# Testing out code functionality 
+torch.manual_seed(123)
+inputs = torch.randn([2, 3, 6])
+feature_dims = inputs.shape[-1]
+vocab_size = inputs.shape[1]
+
+q = torch.randn([vocab_size, feature_dims])
+k = torch.randn([vocab_size, feature_dims])
+v = torch.randn([vocab_size, feature_dims])
+mask = (torch.rand([vocab_size, vocab_size]) > 0.6).int()
+tgt_mask = (torch.rand([vocab_size, vocab_size]) > 0.7).int()
+
+# Change dims such as (batch_size, vocab_size, feature_dims)
+q = torch.stack([q, q], dim= 0)
+k = torch.stack([k, k], dim= 0)
+v = torch.stack([v, v], dim= 0)
+src_mask = torch.stack([mask, mask], dim=0)
+tgt_mask = torch.stack([tgt_mask, tgt_mask], dim= 0)
+
+# Encoder Block
+'''mha = MultiHeadAttention(feature_dims, 2, 0.0)
+print(f'Context_vecs \n{mha(q, k, v, mask)}')'''
+
+encoder_layer = nn.ModuleList([
+    EncoderBlock(
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0), 
+    EncoderBlock(
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0), 
+    EncoderBlock(
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0), 
+    EncoderBlock(
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0), 
+    EncoderBlock(
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0), 
+    EncoderBlock(
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0), 
+])
+
+encoder = Encoder(encoder_layer)
+encoder_output = encoder(inputs, src_mask)
+# Observation: - Why encoder block output is 1 for each element ?
+print(f'EncoderBlock.Values: \n{encoder_output}') 
+
+# Decoder_layer 
+decoder_layer = nn.ModuleList([
+    DecoderBlock(
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0
+    ), 
+    DecoderBlock(
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0
+    ), 
+    DecoderBlock(
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0
+    ), 
+    DecoderBlock(
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0
+    ), 
+    DecoderBlock(
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0
+    ), 
+    DecoderBlock(
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    MultiHeadAttention(feature_dims, 2, 0.0), 
+    FeedForwardNetwork(feature_dims, 0.0), 
+    0.0
+    ), 
+    
+])
+
+decoder = Decoder(decoder_layer)
+decoder_output = decoder(inputs, encoder_output, src_mask, tgt_mask)
+# Observation: - Why decoder block out is also 1 ?
+print(f'DecoderBlock.values: \n{decoder_output}')

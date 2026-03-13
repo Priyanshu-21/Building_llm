@@ -288,104 +288,97 @@ class Decoder(nn.Module):
         
         return self.norm(x)
 
+# Linear Project layer
+class LinearProjection(nn.Module):
 
-# Testing out code functionality 
-torch.manual_seed(123)
-inputs = torch.randn([2, 3, 6])
-feature_dims = inputs.shape[-1]
-vocab_size = inputs.shape[1]
+    def __init__(self, feature_dims: int, vocab_size: int):
+        super().__init__() # calling to nn.Module 
+        self.proj = nn.Linear(feature_dims, vocab_size)
 
-q = torch.randn([vocab_size, feature_dims])
-k = torch.randn([vocab_size, feature_dims])
-v = torch.randn([vocab_size, feature_dims])
-mask = (torch.rand([vocab_size, vocab_size]) > 0.6).int()
-tgt_mask = (torch.rand([vocab_size, vocab_size]) > 0.7).int()
-
-# Change dims such as (batch_size, vocab_size, feature_dims)
-q = torch.stack([q, q], dim= 0)
-k = torch.stack([k, k], dim= 0)
-v = torch.stack([v, v], dim= 0)
-src_mask = torch.stack([mask, mask], dim=0)
-tgt_mask = torch.stack([tgt_mask, tgt_mask], dim= 0)
-
-# Encoder Block
-'''mha = MultiHeadAttention(feature_dims, 2, 0.0)
-print(f'Context_vecs \n{mha(q, k, v, mask)}')'''
-
-encoder_layer = nn.ModuleList([
-    EncoderBlock(
-    MultiHeadAttention(feature_dims, 2, 0.0), 
-    FeedForwardNetwork(feature_dims, 0.0), 
-    0.0), 
-    EncoderBlock(
-    MultiHeadAttention(feature_dims, 2, 0.0), 
-    FeedForwardNetwork(feature_dims, 0.0), 
-    0.0), 
-    EncoderBlock(
-    MultiHeadAttention(feature_dims, 2, 0.0), 
-    FeedForwardNetwork(feature_dims, 0.0), 
-    0.0), 
-    EncoderBlock(
-    MultiHeadAttention(feature_dims, 2, 0.0), 
-    FeedForwardNetwork(feature_dims, 0.0), 
-    0.0), 
-    EncoderBlock(
-    MultiHeadAttention(feature_dims, 2, 0.0), 
-    FeedForwardNetwork(feature_dims, 0.0), 
-    0.0), 
-    EncoderBlock(
-    MultiHeadAttention(feature_dims, 2, 0.0), 
-    FeedForwardNetwork(feature_dims, 0.0), 
-    0.0), 
-])
-
-encoder = Encoder(encoder_layer)
-encoder_output = encoder(inputs, src_mask)
-# Observation: - Why encoder block output is 1 for each element ?
-print(f'EncoderBlock.Values: \n{encoder_output}') 
-
-# Decoder_layer 
-decoder_layer = nn.ModuleList([
-    DecoderBlock(
-    MultiHeadAttention(feature_dims, 2, 0.0), 
-    MultiHeadAttention(feature_dims, 2, 0.0), 
-    FeedForwardNetwork(feature_dims, 0.0), 
-    0.0
-    ), 
-    DecoderBlock(
-    MultiHeadAttention(feature_dims, 2, 0.0), 
-    MultiHeadAttention(feature_dims, 2, 0.0), 
-    FeedForwardNetwork(feature_dims, 0.0), 
-    0.0
-    ), 
-    DecoderBlock(
-    MultiHeadAttention(feature_dims, 2, 0.0), 
-    MultiHeadAttention(feature_dims, 2, 0.0), 
-    FeedForwardNetwork(feature_dims, 0.0), 
-    0.0
-    ), 
-    DecoderBlock(
-    MultiHeadAttention(feature_dims, 2, 0.0), 
-    MultiHeadAttention(feature_dims, 2, 0.0), 
-    FeedForwardNetwork(feature_dims, 0.0), 
-    0.0
-    ), 
-    DecoderBlock(
-    MultiHeadAttention(feature_dims, 2, 0.0), 
-    MultiHeadAttention(feature_dims, 2, 0.0), 
-    FeedForwardNetwork(feature_dims, 0.0), 
-    0.0
-    ), 
-    DecoderBlock(
-    MultiHeadAttention(feature_dims, 2, 0.0), 
-    MultiHeadAttention(feature_dims, 2, 0.0), 
-    FeedForwardNetwork(feature_dims, 0.0), 
-    0.0
-    ), 
+    def forward(self, x):
+        # x:- Input coming from Decoder Layer 
+        # Output:- Probablity for each token with other token 
+        # (batch_size, vocab_size, feature_dims) --> (batch_size, vocab_size, vocab_size)
+        return torch.log_softmax(self.proj(x), dim= -1)
     
-])
+# Transformer Block 
+class Transformer(nn.Module):
 
-decoder = Decoder(decoder_layer)
-decoder_output = decoder(inputs, encoder_output, src_mask, tgt_mask)
-# Observation: - Why decoder block out is also 1 ?
-print(f'DecoderBlock.values: \n{decoder_output}')
+    def __init__(self, src_emb: TokenEmbedding, tgt_emb: TokenEmbedding, src_pos: PositionalEncoding, tgt_pos: PositionalEncoding, encoder: Encoder, decoder: Decoder, proj: LinearProjection) -> None:
+        super().__init__()
+        # Defining each layer to be stitched together 
+        self.src_emb = src_emb
+        self.tgt_emb = tgt_emb
+        self.src_pos = src_pos
+        self.tgt_pos = tgt_pos
+        self.encoder = encoder
+        self.decoder = decoder
+        self.proj = proj 
+
+    # To better visualize and do better inference 
+    # each layer will be defined and formulated differently 
+    # Whole encoder layer together: embedding + positional encoding + encoder
+    def encoder_layer(self, src, src_mask):
+        src = self.src_emb(src)
+        src = self.src_pos(src)
+        return self.encoder(src, src_mask)
+    
+    # Whole decoder layer together: embedding + positional encoding + decoder
+    def decoder_layer(self, tgt, encoder_output, src_mask, tgt_mask):
+        tgt = self.tgt_emb(tgt)
+        tgt = self.tgt_pos(tgt)
+        return self.decoder(tgt, encoder_output, src_mask, tgt_mask)
+    
+    # Projection layer: Probablity of token with other tokens 
+    def projection_layer(self, tgt):
+        return self.proj(tgt)
+
+
+# transformer function to have all the dimensions defined and call to transformer block 
+def build_transformer(src_emb, tgt_emb, src_pos, tgt_pos, src_vocab_size: int, tgt_vocab_size: int, src_context_length: int, tgt_context_length: int, feature_dims: int = 512, n_layer: int = 6, num_head= 8, dropout: float = 0.01):
+    # Embedding layers (encoder, decoder)
+    src_emb = TokenEmbedding(src_vocab_size, feature_dims)
+    tgt_emb = TokenEmbedding(tgt_vocab_size, feature_dims)
+
+    # Positional Encoding Layer (encoder, decoder)
+    src_pos = PositionalEncoding(src_context_length, feature_dims, dropout)
+    tgt_pos = PositionalEncoding(tgt_context_length, feature_dims, dropout)
+
+    # Encoder Block each having lenght = n_layer 
+    encoder_blocks = []
+    for _ in range(n_layer):
+        multi_head_attention = MultiHeadAttention(feature_dims, num_head, dropout)
+        feed_forward_network = FeedForwardNetwork(feature_dims, dropout)
+        encoder_block = EncoderBlock(multi_head_attention, feed_forward_network, dropout)
+        # Stacking each layer together 
+        encoder_blocks.append(encoder_block)
+
+    # Decoder Block each having lenght = n_layer 
+    decoder_blocks = []
+    for _ in range(n_layer):
+        multi_head_attention = MultiHeadAttention(feature_dims, num_head, dropout)
+        cross_multi_head_attention = MultiHeadAttention(feature_dims, num_head, dropout)
+        feed_forward_network = FeedForwardNetwork(feature_dims, dropout)
+        decoder_block = DecoderBlock(multi_head_attention, cross_multi_head_attention, feed_forward_network, dropout)
+        # Stacking each layer together 
+        decoder_blocks.append(decoder_block)
+
+    # Encoder layer 
+    encoder_layer = Encoder(nn.ModuleList(encoder_blocks))
+
+    # Decoder layer 
+    decoder_layer = Decoder(nn.ModuleList(decoder_blocks))
+
+    # Projection Layer 
+    projection_layer = LinearProjection(feature_dims, tgt_vocab_size)
+
+    # Transformer Layer 
+    transformer = Transformer(src_emb, tgt_emb, src_pos, tgt_pos, encoder_layer, decoder_layer, projection_layer)
+
+    # Initialize parameters using xavier_uniform method
+    for p in transformer.parameters():
+        if p.dim() > 1:
+            nn.init.xavier_uniform(p)
+
+    return transformer
+
