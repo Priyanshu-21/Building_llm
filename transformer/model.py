@@ -45,7 +45,7 @@ class PositionalEncoding(nn.Module):
         pe[:, 1::2] = torch.cos(pos * div_term)
 
         # Changing dimension of positional matrix to (batch_size, context_length, feature_dims)
-        pe.unsqueeze(0)
+        pe = pe.unsqueeze(0)
 
         # Register positional encoding matrix (without trainable) to run on any device(cpu/gpu)
         self.register_buffer("positional_encoding", pe)
@@ -55,7 +55,7 @@ class PositionalEncoding(nn.Module):
     
     def forward(self, x):
         # Input embedding = token Embedding + positional encoding 
-        x = x + (self.positional_encoding[:, :x.shape[1]]).requires_grad_(False) # type: ignore # Not trainable matrix
+        x = x + (self.positional_encoding[:, :x.shape[1], :]).requires_grad_(False) #type: ignore # Not trainable matrix
         
         return self.dropout(x)
 
@@ -335,7 +335,7 @@ class Transformer(nn.Module):
 
 
 # transformer function to have all the dimensions defined and call to transformer block 
-def build_transformer(src_emb, tgt_emb, src_pos, tgt_pos, src_vocab_size: int, tgt_vocab_size: int, src_context_length: int, tgt_context_length: int, feature_dims: int = 512, n_layer: int = 6, num_head= 8, dropout: float = 0.01):
+def build_transformer(src_vocab_size: int, tgt_vocab_size: int, src_context_length: int, tgt_context_length: int, feature_dims: int = 512, n_layer: int = 6, num_head= 8, dropout: float = 0.01):
     # Embedding layers (encoder, decoder)
     src_emb = TokenEmbedding(src_vocab_size, feature_dims)
     tgt_emb = TokenEmbedding(tgt_vocab_size, feature_dims)

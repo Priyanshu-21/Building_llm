@@ -29,8 +29,8 @@ class BilingualDataset(Dataset):
         tgt_text = pair["hindi_sentence"]
 
         # Tokenizing each src_text and tgt_text 
-        src_tokens = self.tokenizer.encode(src_text, allowed_special= "<|endoftext|>")
-        tgt_tokens = self.tokenizer.encode(tgt_text, allowed_special= "<|endoftext|>")
+        src_tokens = self.tokenizer.encode(src_text, allowed_special= {"<|endoftext|>"}) 
+        tgt_tokens = self.tokenizer.encode(tgt_text, allowed_special= {"<|endoftext|>"})
 
         # Introduction of padding in source and target tokens 
         src_pad_counts = self.context_length - len(src_tokens) - 2 # 1 for SOS, 1 for EOS
@@ -50,7 +50,7 @@ class BilingualDataset(Dataset):
         )
 
         decoder_input = torch.tensor(
-            [SOS_TOKEN_ID] + tgt_tokens + [EOS_TOKEN_ID] + [PAD_TOKEN_ID] * tgt_pad_counts,
+            [SOS_TOKEN_ID] + tgt_tokens + [PAD_TOKEN_ID] * tgt_pad_counts,
             dtype= torch.int64
         )
 
@@ -58,7 +58,7 @@ class BilingualDataset(Dataset):
             tgt_tokens + [EOS_TOKEN_ID] + [PAD_TOKEN_ID] * tgt_pad_counts,
             dtype= torch.int64
         )
-
+        
         # checking if all calculation is equal to context_length or not
         # each row of encoder, decoder and label == context_length
         assert encoder_input.size(0) == self.context_length
@@ -78,6 +78,7 @@ class BilingualDataset(Dataset):
             "decoder_input": decoder_input, 
             "src_mask": src_mask,
             "tgt_mask": tgt_mask,
+            "label": label,
             "src_text": src_text, 
             "tgt_text": tgt_text
         }
@@ -90,7 +91,7 @@ def casual_mask(size: int) -> torch.Tensor:
 
 
 # Dataloader function: training, validation datasets 
-def data_loader(config: dict) -> tuple: 
+def data_loader(config: dict): 
     # Defining tokenizer used: gpt2 (50257 tokens --> vocab size)
     tokenizer = tiktoken.get_encoding("gpt2")
 
@@ -114,11 +115,11 @@ def data_loader(config: dict) -> tuple:
 
     # Split this filtered datasets into training, validation sets 
     val_split = config.get("val_split", 0.1)
-    val_size = val_split * len(filtered_dataset)
-    train_size = len(filtered_dataset) - val_size
+    val_size = int(val_split * len(filtered_dataset))
+    train_size = int(len(filtered_dataset) - val_size)
 
     # Randomly splitting filtered_dataset into 90% -> training, 10% into validation 
-    train_raw, val_raw = random_split(filtered_dataset, [train_size, val_size])
+    train_raw, val_raw = random_split(filtered_dataset, [train_size, val_size]) # type: ignore
 
     # Getting training and validation datasets from datasets class impl 
     train_datasets = BilingualDataset(train_raw, tokenizer, context_length)
