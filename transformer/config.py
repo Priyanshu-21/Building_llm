@@ -4,7 +4,7 @@ def get_config():
     return {
         "datasource": "Aarif1430/english-to-hindi",
         "batch_size": 8,
-        "learning_rate": 10e-4,
+        "learning_rate": 3e-5,
         "context_length": 256,
         "feature_dims": 512,
         "num_epochs": 20,

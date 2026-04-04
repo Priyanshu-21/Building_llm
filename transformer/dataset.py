@@ -67,8 +67,8 @@ class BilingualDataset(Dataset):
 
         # Masking, self-attention mask: - encoder; Casual-attention mask: - decoder 
         # mask dim (1, 1, context_length)
-        src_mask = (encoder_input != PAD_TOKEN_ID).unsqueeze(0).unsqueeze(0).int()
-        tgt_padding_mask = (decoder_input != PAD_TOKEN_ID).unsqueeze(0).unsqueeze(0).int()
+        src_mask = (encoder_input != PAD_TOKEN_ID).unsqueeze(0).unsqueeze(0).bool()
+        tgt_padding_mask = (decoder_input != PAD_TOKEN_ID).unsqueeze(0).unsqueeze(0).bool()
         tgt_casual_mask = casual_mask(self.context_length)
         # Actual casual mask in decoder 
         tgt_mask = tgt_padding_mask & tgt_casual_mask

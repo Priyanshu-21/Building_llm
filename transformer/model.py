@@ -34,9 +34,9 @@ class PositionalEncoding(nn.Module):
 
         # Each token position in context length matrix 
         pos = torch.arange(0, context_length).unsqueeze(1) # Changing pos to colum wise [0, 1, 2, 3, ....]
-        # freq_scale of each token 
-        freq_scale = 2 * torch.arange(0, context_length) / feature_dims
-        div_term = torch.pow(10000, freq_scale)
+        div_term = torch.exp(
+                   torch.arange(0, feature_dims, 2) * (-math.log(10000.0) / feature_dims)
+                )  # (256,) if feature_dims=512 → actually 256 values
 
         # Setting up approximated values for position (even, odd)
         # Even position, using sine function 
@@ -139,13 +139,13 @@ class MultiHeadAttention(nn.Module):
 
         # Masking Casual: tokens should attend only to previous tokens where mask values == 0 (True)
         if mask is not None:
-            attention_score = attention_score.masked_fill_(mask== 0, 10e-8)
+            attention_score = attention_score.masked_fill(mask == 0, float('-inf'))
         
         # Calculating attention matrix: - softmax + Scaled dot product (sqrt(dims(key)))
         attention_matrix = torch.softmax(attention_score / key.shape[-1]**0.5, dim= -1)
 
         # Applying dropout 
-        dropout(attention_matrix)
+        attention_matrix = dropout(attention_matrix)
 
         # Calculating Context vectors 
         # (batch_size, num_head, token, token) @ (batch_size, num_head, token, head_dims)
@@ -299,7 +299,7 @@ class LinearProjection(nn.Module):
         # x:- Input coming from Decoder Layer 
         # Output:- Probablity for each token with other token 
         # (batch_size, vocab_size, feature_dims) --> (batch_size, vocab_size, vocab_size)
-        return torch.log_softmax(self.proj(x), dim= -1)
+        return self.proj(x)  # raw logits
     
 # Transformer Block 
 class Transformer(nn.Module):
@@ -335,7 +335,7 @@ class Transformer(nn.Module):
 
 
 # transformer function to have all the dimensions defined and call to transformer block 
-def build_transformer(src_vocab_size: int, tgt_vocab_size: int, src_context_length: int, tgt_context_length: int, feature_dims: int = 512, n_layer: int = 6, num_head= 8, dropout: float = 0.01):
+def build_transformer(src_vocab_size: int, tgt_vocab_size: int, src_context_length: int, tgt_context_length: int, feature_dims: int = 512, n_layer: int = 6, num_head= 8, dropout: float = 0.1):
     # Embedding layers (encoder, decoder)
     src_emb = TokenEmbedding(src_vocab_size, feature_dims)
     tgt_emb = TokenEmbedding(tgt_vocab_size, feature_dims)
